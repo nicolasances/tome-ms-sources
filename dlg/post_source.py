@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from pymongo import MongoClient
 from totoms.TotoDelegateDecorator import toto_delegate
 from totoms.model import ExecutionContext, UserContext
 
@@ -51,6 +52,13 @@ async def parse_request(request: Request, config) -> "PostSourceRequest | JSONRe
 async def do(req: "PostSourceRequest", user_context: UserContext, exec_context: ExecutionContext) -> JSONResponse:
     config = exec_context.config
 
+    client = MongoClient(
+        host=config.mongo_host,
+        username=config.mongo_user,
+        password=config.mongo_pwd,
+    )
+    db = client[config.get_db_name()]
+
     source = Source(
         type=req.type,
         language=req.language,
@@ -61,7 +69,7 @@ async def do(req: "PostSourceRequest", user_context: UserContext, exec_context: 
         last_extracted_at=None,
     )
 
-    store = SourcesStore(config)
+    store = SourcesStore(db, config)
     source_id = store.save_source(source)
 
     return JSONResponse(content={"id": source_id}, status_code=201)

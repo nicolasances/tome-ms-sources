@@ -14,6 +14,10 @@ class MyConfig(TotoControllerConfig):
             "pwd_secret_name": "tome-ms-sources-mongo-pswd",
         }
 
+    def get_db_name(self) -> str:
+        """Return the MongoDB database name for this service."""
+        return "tomesources"
+
     @property
     def supported_types(self) -> List[str]:
         """Return the list of supported source types."""
