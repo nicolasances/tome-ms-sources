@@ -15,6 +15,8 @@ from totoms import ( TotoMicroservice, TotoMicroserviceConfiguration, TotoEnviro
 from totoms.TotoMicroservice import APIEndpoint, determine_environment
 
 from dlg.hello import say_hello
+from dlg.post_source import post_source
+from dlg.get_sources import get_sources
 
 def get_microservice_config() -> TotoMicroserviceConfiguration:
     """Create and return the microservice configuration."""
@@ -29,6 +31,8 @@ def get_microservice_config() -> TotoMicroserviceConfiguration:
         api_configuration=APIConfiguration(
             api_endpoints=[
                 APIEndpoint(method="GET", path="/hello", delegate=say_hello),
+                APIEndpoint(method="POST", path="/sources", delegate=post_source),
+                APIEndpoint(method="GET", path="/sources", delegate=get_sources),
             ]
         ),
     )
