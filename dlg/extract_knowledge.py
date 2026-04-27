@@ -5,11 +5,13 @@ import re
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
+from pymongo.auth import authenticate
 import requests
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from starlette import authentication
 from config.prompts import get_prompt
 from langchain_aws import ChatBedrock
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -44,6 +46,7 @@ async def extract_knowledge(request: Request, user_context: UserContext, exec_co
         host=config.mongo_host,
         username=config.mongo_user,
         password=config.mongo_pwd,
+        authSource=config.get_db_name(),
     ) as client:
         db = client[config.get_db_name()]
         store = SourcesStore(db, config)

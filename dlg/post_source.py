@@ -56,6 +56,7 @@ async def do(req: "PostSourceRequest", user_context: UserContext, exec_context: 
         host=config.mongo_host,
         username=config.mongo_user,
         password=config.mongo_pwd,
+        authSource=config.get_db_name(),
     )
     db = client[config.get_db_name()]
 

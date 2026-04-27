@@ -19,7 +19,7 @@ class MyConfig(TotoControllerConfig):
 
         # TOME_LANGUAGE_URL can come from an env var or fall back to a secret
         self._tome_language_url = os.getenv("TOME_LANGUAGE_API_ENDPOINT")
-
+        
         return self
 
     def get_mongo_secret_names(self) -> Optional[Dict[str, str]]:
