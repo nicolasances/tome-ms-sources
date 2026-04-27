@@ -6,11 +6,6 @@ from typing import Optional, Dict, List
 SUPPORTED_TYPES: List[str] = ["google_doc"]
 SUPPORTED_LANGUAGES: List[str] = ["danish"]
 
-# LLM defaults — can be overridden via environment variables
-LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai")
-LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4o-mini")
-LLM_API_KEY_SECRET: str = os.getenv("LLM_API_KEY_SECRET", "openai-api-key")
-
 # Prompt for vocabulary extraction — stored here to allow tuning without code changes
 EXTRACTION_PROMPT: str = (
     "You are a language learning assistant. "
@@ -29,16 +24,10 @@ class MyConfig(TotoControllerConfig):
 
     def __init__(self, environment):
         super().__init__(environment)
-        self._llm_api_key: Optional[str] = None
         self._tome_language_url: Optional[str] = None
 
     async def load(self) -> "MyConfig":
         await super().load()
-
-        # Load LLM API key from secrets manager
-        self._llm_api_key = await asyncio.to_thread(
-            self.secrets_manager.get_secret, LLM_API_KEY_SECRET
-        )
 
         # TOME_LANGUAGE_URL can come from an env var or fall back to a secret
         self._tome_language_url = os.getenv("TOME_LANGUAGE_URL") or await asyncio.to_thread(
@@ -67,21 +56,6 @@ class MyConfig(TotoControllerConfig):
     def supported_languages(self) -> List[str]:
         """Return the list of supported target languages."""
         return SUPPORTED_LANGUAGES
-
-    @property
-    def llm_provider(self) -> str:
-        """Return the LLM provider name."""
-        return LLM_PROVIDER
-
-    @property
-    def llm_model(self) -> str:
-        """Return the LLM model name."""
-        return LLM_MODEL
-
-    @property
-    def llm_api_key(self) -> Optional[str]:
-        """Return the LLM API key loaded from secrets manager."""
-        return self._llm_api_key
 
     @property
     def extraction_prompt(self) -> str:
