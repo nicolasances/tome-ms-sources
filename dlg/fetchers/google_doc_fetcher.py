@@ -24,16 +24,23 @@ class GoogleDocFetcher:
         resource_id = source["resourceId"]
 
         credentials, _ = google_auth_default(scopes=["https://www.googleapis.com/auth/documents.readonly"])
+        
         service = build("docs", "v1", credentials=credentials)
+        
+        sa_email = getattr(credentials, "service_account_email", None)
+        print(f"Using credentials for: {sa_email}")
 
         try:
             result = service.documents().get(documentId=resource_id).execute()
         except HttpError as e:
+            
             if e.resp.status == 403:
+                print(f"{e.resp.status} error: {e._get_reason()}")
                 raise Exception(
                     f"Permission denied accessing Google Doc '{resource_id}'. "
                     "Please share the document with the service account."
                 ) from e
+                
             raise Exception(
                 f"Google Docs API error while accessing document '{resource_id}': {e}"
             ) from e

@@ -17,4 +17,30 @@ To support Google Docs, the user must **manually share a document (or folder) wi
 The Tome app will guide the user through this process. 
 
 
+## Dev Utilities
 
+### test/test_google_doc_fetcher.py
+
+A small script to manually test the `GoogleDocFetcher` against a real Google Doc.
+
+**Prerequisites**
+
+- Google Application Default Credentials must be configured. Run the following once to set them up locally:
+  ```bash
+  gcloud auth application-default login
+  ```
+- The target document must be shared with your authenticated account (or service account).
+
+**Usage**
+
+```bash
+python test/test_google_doc_fetcher.py <google_doc_id>
+```
+
+The `<google_doc_id>` is the long alphanumeric string in the document URL:
+
+```
+https://docs.google.com/document/d/<DOCUMENT_ID>/edit
+```
+
+The script prints the plain-text content extracted from the document, followed by the total character count.
