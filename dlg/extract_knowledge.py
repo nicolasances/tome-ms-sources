@@ -10,6 +10,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from config.prompts import get_prompt
 from langchain_aws import ChatBedrock
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -49,8 +50,10 @@ async def extract_knowledge(request: Request, user_context: UserContext, exec_co
 
         # ── Step 1: Load the source + ownership check ──────────────────────────────
         source = store.find_source_by_id(source_id)
-        if source is None or source.user_id != user_context.email:
-            return JSONResponse(content={"message": "Source not found"}, status_code=404)
+        
+        # Commented out this check for now .. 
+        # if source is None or source.user_id != user_context.email:
+        #     return JSONResponse(content={"message": "Source not found"}, status_code=404)
 
         # ── Step 2: Fetch content ──────────────────────────────────────────────────
         fetcher_cls = FETCHER_REGISTRY.get(source.type)
@@ -61,9 +64,12 @@ async def extract_knowledge(request: Request, user_context: UserContext, exec_co
             )
 
         try:
+            # Fetch
             content: str = fetcher_cls().fetch(source.to_bson())
+            
         except Exception as exc:
             logging.warning("Failed to fetch source content for source %s: %s", source_id, exc)
+            
             return JSONResponse(content={"message": "Failed to fetch source content"}, status_code=502)
 
         if not content:
@@ -96,33 +102,36 @@ async def extract_knowledge(request: Request, user_context: UserContext, exec_co
                 content={"sourceId": source_id, "wordsExtracted": 0, "wordsCreated": 0, "wordsErrored": 0},
                 status_code=200,
             )
+            
+        print(f"Extracted {len(all_pairs)} total pairs, {len(deduped)} after deduplication")
+        print(f"Sample extracted pairs: {deduped[:5]}")
 
         # ── Step 4: POST to tome-ms-language ──────────────────────────────────────
-        auth_header = request.headers.get("Authorization", "")
-        correlation_id = exec_context.cid
+        # auth_header = request.headers.get("Authorization", "")
+        # correlation_id = exec_context.cid
 
-        lang_response = _post_to_language_service(
-            config=config,
-            language=source.language,
-            words=deduped,
-            auth_header=auth_header,
-            correlation_id=correlation_id,
-        )
-        if isinstance(lang_response, JSONResponse):
-            return lang_response
+        # lang_response = _post_to_language_service(
+        #     config=config,
+        #     language=source.language,
+        #     words=deduped,
+        #     auth_header=auth_header,
+        #     correlation_id=correlation_id,
+        # )
+        # if isinstance(lang_response, JSONResponse):
+        #     return lang_response
 
-        words_created, words_errored = lang_response
+        # words_created, words_errored = lang_response
 
         # ── Step 5: Update lastExtractedAt ─────────────────────────────────────────
-        timestamp = datetime.now(timezone.utc).isoformat()
-        store.update_last_extracted_at(source_id, timestamp)
+        # timestamp = datetime.now(timezone.utc).isoformat()
+        # store.update_last_extracted_at(source_id, timestamp)
 
     return JSONResponse(
         content={
             "sourceId": source_id,
             "wordsExtracted": len(deduped),
-            "wordsCreated": words_created,
-            "wordsErrored": words_errored,
+            # "wordsCreated": words_created,
+            # "wordsErrored": words_errored,
         },
         status_code=200,
     )
@@ -213,25 +222,23 @@ def _extract_from_chunks(
     return all_pairs, all_failed
 
 
-def _extract_chunk_with_retry(
-    chunk: str,
-    language: str,
-    config,
-    llm,
-    max_attempts: int = 2,
-) -> Optional[List[dict]]:
+def _extract_chunk_with_retry( chunk: str, language: str, config, llm, max_attempts: int = 2, ) -> Optional[List[dict]]:
     """
     Call the LLM for a single chunk with up to *max_attempts* attempts.
     Returns a (possibly empty) list of valid word-pair dicts, or None on failure.
     """
-    prompt = config.extraction_prompt.format(text=chunk)
+    prompt = get_prompt("extraction").format(text=chunk)
 
     for attempt in range(max_attempts):
         try:
             response = llm.invoke([{"role": "user", "content": prompt}])
+            
             raw = _extract_text_from_response(response)
+            
             data = _parse_json(raw)
+            
             words = data.get("words", [])
+            
             # Validate and filter entries
             valid = [
                 {"english": w["english"], "translation": w["translation"]}
@@ -241,7 +248,9 @@ def _extract_chunk_with_retry(
                 and isinstance(w["english"], str) and isinstance(w["translation"], str)
                 and w["english"].strip() and w["translation"].strip()
             ]
+        
             return valid
+        
         except Exception as exc:
             logging.warning(
                 "LLM extraction attempt %d/%d failed: %s", attempt + 1, max_attempts, exc
@@ -260,6 +269,7 @@ def _extract_text_from_response(response) -> str:
     in the final answer.
     """
     content = response.content if hasattr(response, "content") else str(response)
+    
     if isinstance(content, list):
         parts = []
         for part in content:
@@ -268,6 +278,7 @@ def _extract_text_from_response(response) -> str:
             elif isinstance(part, str):
                 parts.append(part)
         return "".join(parts)
+    
     return str(content)
 
 

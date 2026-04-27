@@ -6,18 +6,6 @@ from typing import Optional, Dict, List
 SUPPORTED_TYPES: List[str] = ["google_doc"]
 SUPPORTED_LANGUAGES: List[str] = ["danish"]
 
-# Prompt for vocabulary extraction — stored here to allow tuning without code changes
-EXTRACTION_PROMPT: str = (
-    "You are a language learning assistant. "
-    "Read the following text and extract every word or short phrase that is written in the target language "
-    "(not in English), along with its English meaning. "
-    "Return a JSON object with a single key 'words' whose value is a list of objects, "
-    "each having 'english' (the English meaning) and 'translation' (the target-language word or phrase). "
-    "Only include entries where both fields are non-empty strings. "
-    "Do not include any other text outside the JSON object.\n\n"
-    "Text:\n{text}"
-)
-
 
 class MyConfig(TotoControllerConfig):
     """Custom configuration for the tome-ms-sources service."""
@@ -30,9 +18,7 @@ class MyConfig(TotoControllerConfig):
         await super().load()
 
         # TOME_LANGUAGE_URL can come from an env var or fall back to a secret
-        self._tome_language_url = os.getenv("TOME_LANGUAGE_URL") or await asyncio.to_thread(
-            self.secrets_manager.get_secret, "tome-language-url"
-        )
+        self._tome_language_url = os.getenv("TOME_LANGUAGE_API_ENDPOINT")
 
         return self
 
@@ -56,11 +42,6 @@ class MyConfig(TotoControllerConfig):
     def supported_languages(self) -> List[str]:
         """Return the list of supported target languages."""
         return SUPPORTED_LANGUAGES
-
-    @property
-    def extraction_prompt(self) -> str:
-        """Return the vocabulary extraction prompt template."""
-        return EXTRACTION_PROMPT
 
     @property
     def tome_language_url(self) -> Optional[str]:

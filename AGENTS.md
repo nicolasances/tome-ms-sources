@@ -1,6 +1,9 @@
-# Coding Standards
+# Project Conventions & Coding Standards
 
 This document defines the coding standards and architectural conventions for all microservices in this repository. 
+
+## Coding & Formatting Standards
+- Function arguments: keep them on online if possible. That should be the preferred way
 
 ---
 
