@@ -204,7 +204,10 @@ def _extract_chunk_with_retry(
                 and w["english"].strip() and w["translation"].strip()
             ]
             return valid
-        except Exception:
+        except Exception as exc:
+            logging.warning(
+                "LLM extraction attempt %d/%d failed: %s", attempt + 1, max_attempts, exc
+            )
             if attempt < max_attempts - 1:
                 continue
     return None
@@ -246,7 +249,7 @@ def _post_to_language_service(
     except Exception as exc:
         logging.warning("tome-ms-language unreachable at %s: %s", url, exc)
         return JSONResponse(
-            content={"message": "tome-ms-language is unreachable"},
+            content={"message": "Failed to communicate with tome-ms-language service"},
             status_code=502,
         )
 
