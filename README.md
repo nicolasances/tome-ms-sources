@@ -2,6 +2,14 @@
 
 This service has the responsibility of managing the **Sources of Knowledge** for Tome. 
 
+## Table of Contents
+
+- [General Capabilities](#general-capabilites)
+- [Currently Supported Sources](#currently-supported-sources)
+  - [Google Docs](#google-docs)
+- [Dev Utilities](#dev-utilities)
+  - [test/test_google_doc_fetcher.py](#testtestgoogleocfetcherpy)
+
 ## General Capabilites
 
 This service provides the following capabilities, reflected through its endpoints: 
