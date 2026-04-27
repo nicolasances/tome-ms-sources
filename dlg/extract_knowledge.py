@@ -12,6 +12,7 @@ from bson.errors import InvalidId
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette import authentication
+from agent.extraction_agent import KnowledgeExtractionAgent, Word
 from config.prompts import get_prompt
 from langchain_aws import ChatBedrock
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -34,7 +35,7 @@ CHUNK_OVERLAP_TOKENS = 200
 async def extract_knowledge(request: Request, user_context: UserContext, exec_context: ExecutionContext):
     source_id = request.path_params.get("sourceId")
     config = exec_context.config
-
+    
     # ── Validate sourceId ──────────────────────────────────────────────────────
     try:
         ObjectId(source_id)
@@ -89,7 +90,12 @@ async def extract_knowledge(request: Request, user_context: UserContext, exec_co
 
         # ── Step 3: LLM extraction ─────────────────────────────────────────────────
         chunks = _split_content(content)
-        all_pairs, all_failed = _extract_from_chunks(chunks, source.language, config)
+        
+        all_pairs, all_failed = await _extract_from_chunks(chunks, source.language, config)
+        
+        logger = TotoLogger.get_instance()
+        logger.log("", f"Extracted {len(all_pairs)} total pairs")
+
 
         if all_failed and len(chunks) > 0:
             return JSONResponse(
@@ -156,52 +162,7 @@ def _split_content(content: str) -> List[str]:
     return splitter.split_text(content)
 
 
-def _create_llm(hyperscaler: str):
-    """Create the appropriate LLM based on the hyperscaler."""
-    logger = TotoLogger.get_instance()
-    provider = hyperscaler.lower()
-
-    if provider == "gcp":
-        project = os.environ.get("GCP_PID")
-        location = os.environ.get("GCP_REGION", "europe-west1")
-        model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-
-        logger.log("LLM", f"Creating Google Gemini LLM with model: {model}, project: {project}, location: {location}")
-
-        return ChatGoogleGenerativeAI(
-            model=model,
-            project=project,
-            location=location,
-            temperature=0,
-            thinking_budget=-1,  # -1 means dynamic/unlimited thinking budget (model decides)
-            include_thoughts=True,
-        )
-
-    if provider == "aws":
-        model_id = os.environ.get("BEDROCK_MODEL_ID", "eu.anthropic.claude-sonnet-4-5-20250929-v1:0")
-        aws_region = os.environ.get("AWS_REGION", "eu-north-1")
-
-        logger.log("LLM", f"Creating AWS Bedrock LLM with model: {model_id}, region: {aws_region}")
-
-        return ChatBedrock(
-            model_id=model_id,
-            region_name=aws_region,
-            model_kwargs={
-                "thinking": {
-                    "type": "enabled",
-                    "budget_tokens": 4096,  # max tokens Claude may spend on internal reasoning
-                },
-            },
-        )
-
-    raise ValueError(f"Unsupported HYPERSCALER '{hyperscaler}'. Use 'aws' or 'gcp'.")
-
-
-def _extract_from_chunks(
-    chunks: List[str],
-    language: str,
-    config,
-) -> Tuple[List[dict], bool]:
+async def _extract_from_chunks( chunks: List[str], language: str, config, ) -> Tuple[List[Word], bool]:
     """
     Run LLM extraction over every chunk.
 
@@ -209,109 +170,55 @@ def _extract_from_chunks(
         (all_pairs, all_failed) where all_failed is True only when every chunk
         failed after its retry.
     """
-    all_pairs: List[dict] = []
+    all_pairs: List[Word] = []
     failed_count = 0
-
-    llm = _create_llm(config.environment.hyperscaler)
+    
+    agent = KnowledgeExtractionAgent(config)
 
     for chunk in chunks:
-        pairs = _extract_chunk_with_retry(chunk, language, config, llm)
-        if pairs is None:
+        
+        words = await _extract_chunk_with_retry(chunk, language, config, agent)
+        
+        if words is None:
             failed_count += 1
         else:
-            all_pairs.extend(pairs)
+            all_pairs.extend(words)
 
     all_failed = failed_count == len(chunks)
     return all_pairs, all_failed
 
 
-def _extract_chunk_with_retry( chunk: str, language: str, config, llm, max_attempts: int = 2, ) -> Optional[List[dict]]:
+async def _extract_chunk_with_retry( chunk: str, language: str, config, agent: KnowledgeExtractionAgent, max_attempts: int = 2, ) -> Optional[List[Word]]:
     """
     Call the LLM for a single chunk with up to *max_attempts* attempts.
     Returns a (possibly empty) list of valid word-pair dicts, or None on failure.
     """
-    prompt = get_prompt("extraction").format(text=chunk)
-
+    logger = TotoLogger.get_instance()
+    
     for attempt in range(max_attempts):
         try:
-            response = llm.invoke([{"role": "user", "content": prompt}])
+            logger.log("", f"LLM extraction attempt {attempt + 1}/{max_attempts} for chunk (first 500 chars): {chunk[:500]!r}")
             
-            raw = _extract_text_from_response(response)
+            words = await agent._extract_knowledge_from_chunk(chunk)
             
-            data = _parse_json(raw)
-            
-            words = data.get("words", [])
-            
-            # Validate and filter entries
-            valid = [
-                {"english": w["english"], "translation": w["translation"]}
-                for w in words
-                if isinstance(w, dict)
-                and w.get("english") and w.get("translation")
-                and isinstance(w["english"], str) and isinstance(w["translation"], str)
-                and w["english"].strip() and w["translation"].strip()
-            ]
-        
-            return valid
+            return words.words
         
         except Exception as exc:
-            logging.warning(
-                "LLM extraction attempt %d/%d failed: %s", attempt + 1, max_attempts, exc
-            )
+            
+            logging.warning( "LLM extraction attempt %d/%d failed: %s", attempt + 1, max_attempts, exc )
+            
             if attempt < max_attempts - 1:
                 continue
+            
     return None
 
 
-def _extract_text_from_response(response) -> str:
-    """
-    Extract the final text answer from an LLM response.
-
-    Thinking models (Gemini with include_thoughts, Bedrock with thinking enabled)
-    return a list of content parts. Only "text" parts (not "thinking") are included
-    in the final answer.
-    """
-    content = response.content if hasattr(response, "content") else str(response)
-    
-    if isinstance(content, list):
-        parts = []
-        for part in content:
-            if isinstance(part, dict) and part.get("type") == "text":
-                parts.append(part.get("text", ""))
-            elif isinstance(part, str):
-                parts.append(part)
-        return "".join(parts)
-    
-    return str(content)
-
-
-def _parse_json(text: str) -> dict:
-    """
-    Parse a JSON object from model output.
-
-    Strips markdown code fences if present, then attempts a direct parse.
-    Falls back to extracting the first JSON object found in the text.
-    """
-    text = text.strip()
-    # Strip markdown code fences (e.g. ```json ... ```)
-    text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
-    text = re.sub(r"\n?```$", "", text.strip())
-    text = text.strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            return json.loads(match.group())
-        raise
-
-
-def _deduplicate(pairs: List[dict]) -> List[dict]:
+def _deduplicate(pairs: List[Word]) -> List[Word]:
     """Remove duplicate (english, translation) pairs (case-insensitive)."""
     seen = set()
     result = []
     for pair in pairs:
-        key = (pair["english"].lower(), pair["translation"].lower())
+        key = (pair.english.lower(), pair.translation.lower())
         if key not in seen:
             seen.add(key)
             result.append(pair)
