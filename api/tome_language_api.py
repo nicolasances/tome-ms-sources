@@ -35,11 +35,8 @@ def post_words( config: MyConfig, language: str, words: List[Word], auth_header:
     except Exception as exc:
         
         print(exc)
+        raise exc
         
-        return JSONResponse(
-            content={"message": "Failed to communicate with tome-ms-language service"},
-            status_code=500,
-        )
 
     resp_data = resp.json()
     
