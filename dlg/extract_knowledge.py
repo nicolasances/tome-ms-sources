@@ -13,9 +13,9 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette import authentication
 from agent.extraction_agent import KnowledgeExtractionAgent, Word
+from api.tome_language_api import post_words
+from config.config import MyConfig
 from config.prompts import get_prompt
-from langchain_aws import ChatBedrock
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pymongo import MongoClient
 from totoms.TotoLogger import TotoLogger
@@ -34,7 +34,7 @@ CHUNK_OVERLAP_TOKENS = 200
 @toto_delegate
 async def extract_knowledge(request: Request, user_context: UserContext, exec_context: ExecutionContext):
     source_id = request.path_params.get("sourceId")
-    config = exec_context.config
+    config: MyConfig = exec_context.config # type: ignore
     
     # ── Validate sourceId ──────────────────────────────────────────────────────
     try:
@@ -116,20 +116,10 @@ async def extract_knowledge(request: Request, user_context: UserContext, exec_co
         print(f"Sample extracted pairs: {deduped[:5]}")
 
         # ── Step 4: POST to tome-ms-language ──────────────────────────────────────
-        # auth_header = request.headers.get("Authorization", "")
-        # correlation_id = exec_context.cid
-
-        # lang_response = _post_to_language_service(
-        #     config=config,
-        #     language=source.language,
-        #     words=deduped,
-        #     auth_header=auth_header,
-        #     correlation_id=correlation_id,
-        # )
-        # if isinstance(lang_response, JSONResponse):
-        #     return lang_response
-
-        # words_created, words_errored = lang_response
+        auth_header = request.headers.get("Authorization", "")
+        correlation_id = exec_context.cid
+        
+        words_created, words_errored = post_words(config, "danish", deduped, auth_header, correlation_id)
 
         # ── Step 5: Update lastExtractedAt ─────────────────────────────────────────
         # timestamp = datetime.now(timezone.utc).isoformat()
@@ -225,45 +215,3 @@ def _deduplicate(pairs: List[Word]) -> List[Word]:
     return result
 
 
-def _post_to_language_service(
-    config,
-    language: str,
-    words: List[dict],
-    auth_header: str,
-    correlation_id: str,
-) -> "Tuple[int, int] | JSONResponse":
-    """
-    POST words to tome-ms-language. Returns (words_created, words_errored) on
-    success (207), or a JSONResponse with status 502 on failure.
-    """
-    url = f"{config.tome_language_url}/tomelang/vocabulary/{language}/words/batch"
-    headers = {
-        "Authorization": auth_header,
-        "x-correlation-id": correlation_id,
-        "Content-Type": "application/json",
-    }
-    payload = {"words": words}
-
-    try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=30)
-    except Exception as exc:
-        logging.warning("tome-ms-language unreachable at %s: %s", url, exc)
-        return JSONResponse(
-            content={"message": "Failed to communicate with tome-ms-language service"},
-            status_code=502,
-        )
-
-    if resp.status_code != 207:
-        detail = resp.text[:500] if resp.text else "(no body)"
-        return JSONResponse(
-            content={
-                "message": f"tome-ms-language returned unexpected status {resp.status_code}",
-                "detail": detail,
-            },
-            status_code=502,
-        )
-
-    resp_data = resp.json()
-    words_created = sum(1 for w in resp_data.get("words", []) if w.get("status") == "created")
-    words_errored = sum(1 for w in resp_data.get("words", []) if w.get("status") == "error")
-    return words_created, words_errored
