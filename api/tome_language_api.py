@@ -15,7 +15,7 @@ def post_words( config: MyConfig, language: str, words: List[Word], auth_header:
     """
     logger = TotoLogger.get_instance()
     
-    url = f"{config.tome_language_url}/tomelang/vocabulary/{language}/words/batch"
+    url = f"{config.tome_language_url}/vocabulary/{language}/words/batch"
     
     headers = {
         "Authorization": auth_header,
@@ -23,7 +23,7 @@ def post_words( config: MyConfig, language: str, words: List[Word], auth_header:
         "Content-Type": "application/json",
     }
     
-    payload = {"words": words}
+    payload = {"words": [w.model_dump() for w in words]}
 
     try:
         logger.log(correlation_id, f"Posting {len(words)} words to Tome Language API")
