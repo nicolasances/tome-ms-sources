@@ -33,17 +33,35 @@ class KnowledgeExtractionAgent:
         
         # 2. Create the prompt
         prompt = f"""
-            You are an expert English to Danish translator and you are great at looking at a text and extracting all the words that are in Danish, along with their English translation.
-            
-            Your task is to read a text and extract Danish words and provide their English translation.
-            
-            Important rules to follow: 
-            1.  Only extract words that are in Danish, not in English.
-            
-            2.  Do not extract sentences nor short phrases. Only individual words, one at a time. This is important. No more than one word at a time. 
-            
-            3.  Skip prepositions and very common words like "at", "til", "og", "i", "er", "en", "det", "som", "på", "med", "for", "de", "der", etc. 
-                I.e. skip very common words that are not useful to learn on their own.
+            You are an expert English to Danish translator building a vocabulary list for language learners.
+
+            Your task is to extract Danish vocabulary from a text that will be used for translation quizzes 
+            (e.g., "Translate 'to live' to Danish" → "at bo").
+
+            Important rules:
+
+            1. WORD FORMS - Always use dictionary/base forms:
+               - Verbs: Use infinitive with "at" prefix (e.g., "at bo", "at lære", "at kæmpe")
+               - Nouns: Use indefinite singular with article (e.g., "en ven", "et liv", "en hemmelighed")
+               - Adjectives: Use base form (e.g., "modig" not "modige")
+
+            2. ENGLISH SIDE - Match the Danish form:
+               - For verbs: use "to + verb" (e.g., "to live", "to learn")
+               - For nouns: use "a/an + noun" or just the noun (e.g., "a friend", "life")
+
+            3. IDIOMATIC EXPRESSIONS - Keep meaningful phrases together:
+               - If words only make sense together, extract as a phrase (e.g., "makes sense" → "giver mening", "to need" → "at have brug for")
+               - Don't break idioms into individual words
+
+            4. SKIP these:
+               - Very common words (at, til, og, i, er, en, det, som, på, med, for, de, der)
+               - Words that are identical in English and Danish
+               - Words that don't make sense as standalone quiz items
+               - Duplicate word forms (if you already have "a friend/en ven", don't add "friends/venner")
+
+            5. QUIZ SUITABILITY - Only extract words where:
+               - The English prompt clearly indicates what translation is expected
+               - The translation is unambiguous enough for a quiz
         """
         
         # 3. Create a structured output chain
