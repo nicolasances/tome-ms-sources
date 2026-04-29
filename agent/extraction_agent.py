@@ -73,7 +73,7 @@ class KnowledgeExtractionAgent:
         words: Words = await structured_llm.ainvoke([
             SystemMessage(content=prompt),
             HumanMessage(content="Extract the Danish words and their English translation from the following text: " + chunk),
-        ])
+        ]) # type: ignore
 
         logger.log("", f"Extracted {len(words.words)} words")
         logger.log("", f"First extracted words: {words.words[:20]}")        
