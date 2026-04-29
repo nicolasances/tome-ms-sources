@@ -4,6 +4,7 @@ on:
   push:
     branches: 
       - 'release/**'
+      - main
 
 env:
   SERVICE_NAME: 'tome-ms-sources'
