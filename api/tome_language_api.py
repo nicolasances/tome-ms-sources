@@ -1,3 +1,4 @@
+import os
 from typing import List, Tuple
 
 from fastapi.responses import JSONResponse
@@ -6,6 +7,9 @@ from agent.extraction_agent import Word
 from config.config import MyConfig
 
 import requests
+
+# Use custom CA bundle if specified, otherwise use default (True)
+SSL_CA_BUNDLE = os.environ.get("REQUESTS_CA_BUNDLE", True)
 
 def post_words( config: MyConfig, language: str, words: List[Word], auth_header: str, correlation_id: str) -> Tuple[int, int]:
     """
@@ -28,7 +32,7 @@ def post_words( config: MyConfig, language: str, words: List[Word], auth_header:
     try:
         logger.log(correlation_id, f"Posting {len(words)} words to Tome Language API")
         
-        resp = requests.post(url, json=payload, headers=headers, timeout=30)
+        resp = requests.post(url, json=payload, headers=headers, timeout=30, verify=SSL_CA_BUNDLE)
         
         logger.log(correlation_id, f"Successfully posted {len(words)} to Tome Language API")
         
