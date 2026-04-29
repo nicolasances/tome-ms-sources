@@ -11,7 +11,7 @@ import requests
 # Use custom CA bundle if specified, otherwise use default (True)
 SSL_CA_BUNDLE = os.environ.get("REQUESTS_CA_BUNDLE", True)
 
-def post_words( config: MyConfig, language: str, words: List[Word], auth_header: str, correlation_id: str) -> Tuple[int, int]:
+def post_words( config: MyConfig, language: str, words: List[Word], source_id: str, auth_header: str, correlation_id: str) -> Tuple[int, int]:
     """
     POST words to tome-ms-language. 
     Returns (words_created, words_errored) on
@@ -27,7 +27,8 @@ def post_words( config: MyConfig, language: str, words: List[Word], auth_header:
         "Content-Type": "application/json",
     }
     
-    payload = {"words": [w.model_dump() for w in words]}
+    # Add knowledgeSource to each word before sending
+    payload = {"words": [{**w.model_dump(), "knowledgeSource": source_id} for w in words]}
 
     try:
         logger.log(correlation_id, f"Posting {len(words)} words to Tome Language API")
@@ -44,7 +45,7 @@ def post_words( config: MyConfig, language: str, words: List[Word], auth_header:
 
     resp_data = resp.json()
     
-    words_created = sum(1 for w in resp_data.get("words", []) if w.get("status") == "created")
-    words_errored = sum(1 for w in resp_data.get("words", []) if w.get("status") == "error")
+    words_created = sum(1 for w in resp_data.get("results", []) if w.get("status") == "created")
+    words_errored = sum(1 for w in resp_data.get("results", []) if w.get("status") == "error")
     
     return (words_created, words_errored)

@@ -12,6 +12,7 @@ from config.config import MyConfig
 class Word(BaseModel):
     english: str
     translation: str
+    knowledgeSource: str = ""
     
 class Words(BaseModel): 
     words: List[Word]

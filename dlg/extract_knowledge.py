@@ -119,7 +119,7 @@ async def extract_knowledge(request: Request, user_context: UserContext, exec_co
         auth_header = request.headers.get("Authorization", "")
         correlation_id = exec_context.cid
         
-        words_created, words_errored = post_words(config, "danish", deduped, auth_header, correlation_id)
+        words_created, words_errored = post_words(config, "danish", deduped, source_id, auth_header, correlation_id)
 
         # ── Step 5: Update lastExtractedAt ─────────────────────────────────────────
         # timestamp = datetime.now(timezone.utc).isoformat()
