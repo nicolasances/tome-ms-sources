@@ -32,7 +32,7 @@ def post_words( config: MyConfig, language: str, words: List[Word], auth_header:
     try:
         logger.log(correlation_id, f"Posting {len(words)} words to Tome Language API")
         
-        resp = requests.post(url, json=payload, headers=headers, timeout=30, verify=SSL_CA_BUNDLE)
+        resp = requests.post(url, json=payload, headers=headers, timeout=30, verify=False)
         
         logger.log(correlation_id, f"Successfully posted {len(words)} to Tome Language API")
         
