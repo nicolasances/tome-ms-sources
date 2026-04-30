@@ -43,9 +43,15 @@ def post_words( config: MyConfig, language: str, words: List[Word], source_id: s
         raise exc
         
 
-    resp_data = resp.json()
+    try: 
+        resp_data = resp.json()
+        
+        words_created = sum(1 for w in resp_data.get("results", []) if w.get("status") == "created")
+        words_errored = sum(1 for w in resp_data.get("results", []) if w.get("status") == "error")
     
-    words_created = sum(1 for w in resp_data.get("results", []) if w.get("status") == "created")
-    words_errored = sum(1 for w in resp_data.get("results", []) if w.get("status") == "error")
-    
-    return (words_created, words_errored)
+        return (words_created, words_errored)
+        
+    except Exception as e: 
+        
+        print(e)
+        print(resp)
