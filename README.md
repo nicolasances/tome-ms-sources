@@ -7,6 +7,7 @@ This service has the responsibility of managing the **Sources of Knowledge** for
 - [General Capabilities](#general-capabilites)
 - [Currently Supported Sources](#currently-supported-sources)
   - [Google Docs](#google-docs)
+- [Specs](#specs)
 - [Dev Utilities](#dev-utilities)
   - [test/test_google_doc_fetcher.py](#testtestgoogleocfetcherpy)
 
@@ -23,6 +24,12 @@ This service provides the following capabilities, reflected through its endpoint
 ### Google Docs
 To support Google Docs, the user must **manually share a document (or folder) with the GCP Service Account of this service**. <br>
 The Tome app will guide the user through this process. 
+
+
+## Specs
+
+### Language Learning
+- [Source Knowledge Extraction](./docs/specs/language/source-knowledge-extraction.md) — full specification for data model, API endpoints, extraction workflow, and source type implementations
 
 
 ## Dev Utilities
