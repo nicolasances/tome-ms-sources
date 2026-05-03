@@ -122,15 +122,15 @@ async def extract_knowledge(request: Request, user_context: UserContext, exec_co
         words_created, words_errored = post_words(config, "danish", deduped, source_id, auth_header, correlation_id)
 
         # ── Step 5: Update lastExtractedAt ─────────────────────────────────────────
-        # timestamp = datetime.now(timezone.utc).isoformat()
-        # store.update_last_extracted_at(source_id, timestamp)
+        timestamp = datetime.now(timezone.utc).isoformat()
+        store.update_last_extracted_at(source_id, timestamp)
 
     return JSONResponse(
         content={
             "sourceId": source_id,
             "wordsExtracted": len(deduped),
-            # "wordsCreated": words_created,
-            # "wordsErrored": words_errored,
+            "wordsCreated": words_created,
+            "wordsErrored": words_errored,
         },
         status_code=200,
     )
