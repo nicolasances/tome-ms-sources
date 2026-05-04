@@ -67,7 +67,7 @@ Triggers on-demand sentence generation.
 
 Call `GET /tomelang/vocabulary/{language}/words/sample?n=M` on `tome-ms-language` to retrieve a random set of `M` vocabulary words.
 
-`M` is a service-level configuration value (default: `30`). It is not exposed in the request body — the caller only specifies how many sentences to generate (`count`), not how many words to seed the generator with.
+**Default:** `M = Ns` (the number of sentences requested). This means one seed word is sampled per desired sentence, and each sentence will be built around its own word. The value `M` may be overridden by a service-level configuration if needed.
 
 If the vocabulary is empty (the endpoint returns an empty list), skip Steps 2–4 and return `200` with all counts at `0`.
 
@@ -75,11 +75,15 @@ If the vocabulary is empty (the endpoint returns an empty list), skip Steps 2–
 
 Pass the sampled vocabulary words to a **dedicated sentence generation LangChain agent**. This agent is distinct from both the vocabulary extraction agent and the sentence extraction agent — it has its own prompt file.
 
-**Goal:** generate exactly `count` sentences in the target language (e.g. Danish). Each sentence must:
-- Be grammatically correct Danish.
-- Naturally use at least one of the sampled vocabulary words.
+**Goal:** generate exactly `Ns` sentences in the target language (e.g. Danish), one sentence per sampled word (since `M = Ns` by default). Each sentence must:
+
+- Be built around its assigned seed word — the sentence must naturally use that word (or a grammatically appropriate conjugated / inflected form of it).
+- Be **realistic and meaningful** — something a native speaker would genuinely say. The sentence must make sense in a real-life context.
+- **Not force multiple unrelated vocabulary words into the same sentence.** If additional sampled words happen to fit naturally and logically in the sentence, they may appear — but this must never be the primary goal, and artificial constructions are forbidden.
 - Have an English translation.
-- Be realistic, complete sentences — not single words or fragments.
+- Be a complete sentence — not a single word or a fragment.
+
+**Handling inflected forms:** Vocabulary words may be stored in their dictionary form. For example, verbs may appear as `"at lave"` (infinitive). The generated sentence must use the word in whatever grammatical form is appropriate for the sentence — e.g. `"at lave"` may appear as `laver`, `lavede`, `lavet`, `lav` etc. The seed word only constrains which word root must appear; it does not impose a specific conjugation.
 
 **Expected LLM output (structured / JSON mode):**
 
@@ -87,12 +91,12 @@ Pass the sampled vocabulary words to a **dedicated sentence generation LangChain
 {
   "sentences": [
     {
-      "sentence": "Jeg kan godt lide at læse bøger om dansk kultur.",
-      "translation": "I like reading books about Danish culture."
+      "sentence": "Jeg laver aftensmad i aften.",
+      "translation": "I am making dinner tonight."
     },
     {
-      "sentence": "Hun vænner sig langsomt til det kolde vejr.",
-      "translation": "She is slowly getting used to the cold weather."
+      "sentence": "Kom allesammen, jeg har lavet aftensmaden.",
+      "translation": "Come everyone, I have made dinner."
     }
   ]
 }
@@ -155,7 +159,7 @@ If `tome-ms-language` returns any status other than `207`, the request fails wit
 
 - The sentence generation agent and the verification agent each use their own **separate prompt files**. Prompts must be easy to tune without code changes.
 - The model and provider are defined in the service configuration (same pattern as the extraction agents).
-- The number of seed words `M` must be a service-level configuration value (not hardcoded).
+- The value of `M` defaults to `Ns` (computed at runtime). A service-level configuration override is allowed if a different ratio is ever needed.
 
 ---
 
@@ -177,10 +181,12 @@ The following endpoints are used:
 ## Business Rules
 
 1. **`count` cap:** A maximum of `50` sentences may be generated per request to limit LLM latency and cost.
-2. **Seed words:** The number of words sampled from vocabulary (`M`) is a server-side setting, decoupled from `count`. Using more seed words generally produces more varied sentences.
-3. **No deduplication:** The same sentence may be generated and stored multiple times across calls. Deduplication is out of scope.
-4. **Provenance:** All sentences produced by this workflow carry `knowledgeSource = "tome-agent"` so they can be distinguished from sentences extracted from source material.
-5. **Verification is mandatory:** The verification step (Step 3) cannot be bypassed. It ensures quality and guards against LLM hallucinations generating incorrect Danish.
+2. **Seed words — one per sentence:** By default `M = Ns`. Each sentence is generated around one seed word. This produces focused, natural sentences rather than forcing unrelated words together.
+3. **No forced word combinations:** Multiple seed words may appear in the same sentence only if they fit together naturally. The agent must never construct artificial sentences purely to include several vocabulary words.
+4. **Inflected forms are acceptable:** A seed word stored in dictionary form (e.g. `"at lave"`) may appear in any grammatically correct conjugated or inflected form in the generated sentence (e.g. `laver`, `lavede`, `lavet`). The generated sentence is not required to contain the exact stored string.
+5. **No deduplication:** The same sentence may be generated and stored multiple times across calls. Deduplication is out of scope.
+6. **Provenance:** All sentences produced by this workflow carry `knowledgeSource = "tome-agent"` so they can be distinguished from sentences extracted from source material.
+7. **Verification is mandatory:** The verification step (Step 3) cannot be bypassed. It ensures quality and guards against LLM hallucinations generating incorrect Danish.
 
 ---
 
