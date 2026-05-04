@@ -5,15 +5,17 @@
 This spec defines how `tome-ms-sources` enables the **Language Learning** use-case of Tome by:
 
 1. **Persisting Data Sources** — storing metadata about a user's learning material (e.g. a Google Doc) in MongoDB.
-2. **Extracting Knowledge** — on demand, fetching the raw text from the source, using an LLM chain (LangChain) to extract vocabulary pairs, and pushing those pairs to `tome-ms-language` in bulk.
+2. **Extracting Knowledge** — on demand, fetching the raw text from the source, using two parallel LLM agents (LangChain) to extract:
+   - **Vocabulary pairs** (words and translations), pushed to `tome-ms-language`.
+   - **Sentences** (phrases and translations found in the source material), also pushed to `tome-ms-language`.
 
 The overall user journey is:
 
-> The user registers a Google Doc as a Data Source, then manually triggers extraction. Extraction reads the document, extracts word-translation pairs, and inserts them into the vocabulary.
+> The user registers a Google Doc as a Data Source, then manually triggers extraction. Extraction reads the document, extracts word-translation pairs and sentence-translation pairs, and inserts them into the respective stores in `tome-ms-language`.
 
 This matches the two-step model described in the [Data Sources in Language Learning](https://github.com/nicolasances/tome/blob/main/docs/capabilities/language/data-sources.md) product doc: **Add** is separate from **Fetch & Process**.
 
-> **Note on repeated extraction:** Triggering extraction more than once on the same source is safe to do — the workflow will re-read the current document and push the results each time. However, because `tome-ms-language` does not deduplicate, repeated extractions will insert duplicate vocabulary entries. This is acceptable; deduplication is out of scope for this spec.
+> **Note on repeated extraction:** Triggering extraction more than once on the same source is safe to do — the workflow will re-read the current document and push the results each time. However, because `tome-ms-language` does not deduplicate, repeated extractions will insert duplicate vocabulary or sentence entries. This is acceptable; deduplication is out of scope for this spec.
 
 ---
 
@@ -161,17 +163,23 @@ Returns a summary of the extraction:
   "sourceId": "664abc123def456789abcdef",
   "wordsExtracted": 42,
   "wordsCreated": 38,
-  "wordsErrored": 4
+  "wordsErrored": 4,
+  "sentencesExtracted": 12,
+  "sentencesCreated": 11,
+  "sentencesErrored": 1
 }
 ```
 
-| Field            | Description                                                                                                                                  |
-|------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
-| `wordsExtracted` | Number of valid word pairs submitted to `tome-ms-language` after LLM output parsing and local validation (pairs with missing fields are not counted) |
-| `wordsCreated`   | Words reported as `"created"` by `tome-ms-language` in the `207` response                                                                   |
-| `wordsErrored`   | Words reported as `"error"` by `tome-ms-language` in the `207` response                                                                     |
+| Field                | Description                                                                                                                                     |
+|----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| `wordsExtracted`     | Number of valid word pairs submitted to `tome-ms-language` after LLM output parsing and local validation (pairs with missing fields are not counted) |
+| `wordsCreated`       | Words reported as `"created"` by `tome-ms-language` in the `207` response                                                                      |
+| `wordsErrored`       | Words reported as `"error"` by `tome-ms-language` in the `207` response                                                                        |
+| `sentencesExtracted` | Number of valid sentence pairs submitted to `tome-ms-language` after LLM output parsing and local validation                                    |
+| `sentencesCreated`   | Sentences reported as `"created"` by `tome-ms-language` in the `207` response                                                                  |
+| `sentencesErrored`   | Sentences reported as `"error"` by `tome-ms-language` in the `207` response                                                                    |
 
-`wordsCreated + wordsErrored` must always equal `wordsExtracted`.
+`wordsCreated + wordsErrored` must always equal `wordsExtracted`. `sentencesCreated + sentencesErrored` must always equal `sentencesExtracted`.
 
 #### Error Cases
 
@@ -210,7 +218,7 @@ This step dispatches to a **Source Content Fetcher** selected by the source's `t
 - If the resource cannot be accessed (permission denied, not found, network error), it raises an error that causes `ExtractKnowledge` to return `502`.
 
 **Once the fetcher returns:**
-- If the plain-text string is empty, skip Steps 3–4 and return `200` with all counts at `0`.
+- If the plain-text string is empty, skip Steps 3–5 and return `200` with all counts at `0`.
 
 > **Content length limit:** Plain-text content exceeding **500,000 characters** is rejected with `400` — the source is considered too large to process regardless of type.
 
@@ -245,7 +253,42 @@ Pass the plain-text content (or each chunk) to a LangChain chain configured with
 - The model and provider (e.g. OpenAI, Anthropic, Bedrock) are defined in the service configuration. The LLM API key must be loaded from the secrets manager.
 - The prompt must be treated as a service-level concern and must be easy to tune without code changes (e.g. stored in the service configuration or a dedicated prompt file).
 
-### Step 4 — Post Vocabulary to tome-ms-language
+### Step 4 — LLM Sentence Extraction (LangChain)
+
+Pass the same plain-text content (or each chunk) to a **separate** LangChain agent dedicated to sentence extraction. This agent runs independently from the vocabulary extraction agent (Step 3) — they may run sequentially or in parallel; the implementation may choose.
+
+**Goal:** identify every complete **sentence or phrase** written in the target language (e.g. Danish) that appears in the source material, along with its English translation. The agent must **only extract sentences already present in the text** — it must never invent or synthesise new sentences.
+
+**Translation priority:**
+1. If a translation for the sentence is present in the source material (directly paired with the sentence), use that translation.
+2. If no translation is present in the material, generate the English translation using the LLM based on the Danish sentence.
+
+**Expected LLM output (structured / JSON mode):**
+
+```json
+{
+  "sentences": [
+    {
+      "sentence": "Jeg kan godt lide at læse bøger.",
+      "translation": "I like reading books."
+    },
+    {
+      "sentence": "Hvornår kom du til Danmark?",
+      "translation": "When did you come to Denmark?"
+    }
+  ]
+}
+```
+
+**Validation of LLM output:** each entry must have both `sentence` and `translation` as non-empty strings. Entries that fail this check are silently dropped.
+
+**LLM failure handling:** applies the same retry policy as Step 3 — one retry per failing chunk, skip the chunk on second failure, return `502` only if all chunks fail.
+
+**LLM configuration:** same rules as Step 3 — model and prompt are service-level concerns, easy to tune without code changes. The sentence extraction prompt must be stored in a **separate prompt file** from the vocabulary extraction prompt.
+
+**Deduplication:** duplicate `(sentence, translation)` pairs appearing across chunks are deduplicated (case-insensitive on `sentence`) before being submitted to `tome-ms-language`.
+
+### Step 5 — Post Vocabulary to tome-ms-language
 
 Call `POST /tomelang/vocabulary/{language}/words/batch` on `tome-ms-language` with the extracted words:
 
@@ -270,7 +313,31 @@ The `207 Multi-Status` response contains per-word `status` values (`"created"` o
 
 > **Note on duplicates:** `tome-ms-language` allows multiple translations of the same English word. Deduplication of vocabulary entries across extraction runs is **out of scope** for this service; the vocabulary service is the owner of that concern.
 
-### Step 5 — Update the Data Source Record
+### Step 6 — Post Sentences to tome-ms-language
+
+Call `POST /tomelang/sentences/{language}/batch` on `tome-ms-language` with the extracted sentences:
+
+```json
+{
+  "sentences": [
+    {
+      "sentence": "Jeg kan godt lide at læse bøger.",
+      "translation": "I like reading books.",
+      "knowledgeSource": "664abc123def456789abcdef"
+    }
+  ]
+}
+```
+
+The `knowledgeSource` field must be set to the `sourceId` of the Data Source being extracted.
+
+**Authentication and Correlation:** same rules as Step 5 — forward the user's JWT and include the correlation ID.
+
+If `tome-ms-language` returns any status other than `207`, the sentence submission fails. **This does not abort the overall extraction** — a sentence submission failure is logged and the `sentencesErrored` count reflects the failure, but the extraction response is still `200`. The vocabulary counts already computed in Step 5 are unaffected.
+
+The `207 Multi-Status` response contains per-sentence `status` values (`"created"` or `"error"`). These are counted to populate `sentencesCreated` and `sentencesErrored` in the response.
+
+### Step 7 — Update the Data Source Record
 
 Update `lastExtractedAt` on the source document to the current UTC time (ISO 8601). This update happens whenever the extraction workflow reaches this step — regardless of how many words were extracted or how many errored in `tome-ms-language`. The timestamp reflects "extraction was attempted and the workflow completed", not "all words were created successfully".
 
@@ -316,11 +383,13 @@ The fetcher uses the **GCP Service Account** credentials available to the servic
 
 ## Integration — tome-ms-language
 
-The `tome-ms-language` base URL must be provided via an environment variable or secret (e.g. `TOME_LANGUAGE_URL`). The service calls the following endpoint:
+The `tome-ms-language` base URL must be provided via an environment variable or secret (e.g. `TOME_LANGUAGE_URL`). The service calls the following endpoints:
 
-| Method | Path                                           | Purpose                  |
-|--------|------------------------------------------------|--------------------------|
-| `POST` | `/tomelang/vocabulary/{language}/words/batch`  | Bulk-insert vocabulary   |
+| Method | Path                                             | Purpose                   |
+|--------|--------------------------------------------------|---------------------------|
+| `POST` | `/tomelang/vocabulary/{language}/words/batch`    | Bulk-insert vocabulary    |
+| `POST` | `/tomelang/sentences/{language}/batch`           | Bulk-insert sentences     |
+| `GET`  | `/tomelang/vocabulary/{language}/words/sample`   | Random word sample (used by sentence generation — see [`sentence-generation.md`](./sentence-generation.md)) |
 
 **Authentication:** Forward the user's JWT from the incoming request as `Authorization: Bearer <token>`.
 

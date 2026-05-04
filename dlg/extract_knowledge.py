@@ -13,7 +13,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette import authentication
 from agent.extraction_agent import KnowledgeExtractionAgent, Word
-from api.tome_language_api import post_words
+from agent.sentence_extraction_agent import SentenceExtractionAgent, SentencePair
+from api.tome_language_api import post_words, post_sentences
 from config.config import MyConfig
 from config.prompts import get_prompt
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -78,7 +79,8 @@ async def extract_knowledge(request: Request, user_context: UserContext, exec_co
 
         if not content:
             return JSONResponse(
-                content={"sourceId": source_id, "wordsExtracted": 0, "wordsCreated": 0, "wordsErrored": 0},
+                content={"sourceId": source_id, "wordsExtracted": 0, "wordsCreated": 0, "wordsErrored": 0,
+                         "sentencesExtracted": 0, "sentencesCreated": 0, "sentencesErrored": 0},
                 status_code=200,
             )
 
@@ -88,10 +90,10 @@ async def extract_knowledge(request: Request, user_context: UserContext, exec_co
                 status_code=400,
             )
 
-        # ── Step 3: LLM extraction ─────────────────────────────────────────────────
+        # ── Step 3: LLM vocabulary extraction ─────────────────────────────────────
         chunks = _split_content(content)
         
-        all_pairs, all_failed = await _extract_from_chunks(chunks, source.language, config)
+        all_pairs, all_failed = await _extract_words_from_chunks(chunks, source.language, config)
         
         logger = TotoLogger.get_instance()
         logger.log("", f"Extracted {len(all_pairs)} total pairs")
@@ -106,22 +108,37 @@ async def extract_knowledge(request: Request, user_context: UserContext, exec_co
         # Deduplicate (case-insensitive on both fields)
         deduped = _deduplicate(all_pairs)
 
-        if not deduped:
-            return JSONResponse(
-                content={"sourceId": source_id, "wordsExtracted": 0, "wordsCreated": 0, "wordsErrored": 0},
-                status_code=200,
-            )
-            
         print(f"Extracted {len(all_pairs)} total pairs, {len(deduped)} after deduplication")
         print(f"Sample extracted pairs: {deduped[:5]}")
 
-        # ── Step 4: POST to tome-ms-language ──────────────────────────────────────
+        # ── Step 4: LLM sentence extraction ───────────────────────────────────────
+        all_sentence_pairs, sentences_all_failed = await _extract_sentences_from_chunks(chunks, source.language, config)
+        deduped_sentences = _deduplicate_sentences(all_sentence_pairs)
+        logger.log("", f"Extracted {len(deduped_sentences)} sentences after deduplication")
+
+        # ── Step 5: POST vocabulary to tome-ms-language ────────────────────────────
         auth_header = request.headers.get("Authorization", "")
         correlation_id = exec_context.cid
-        
-        words_created, words_errored = post_words(config, "danish", deduped, source_id, auth_header, correlation_id)
 
-        # ── Step 5: Update lastExtractedAt ─────────────────────────────────────────
+        words_created = 0
+        words_errored = 0
+        if deduped:
+            words_created, words_errored = post_words(config, "danish", deduped, source_id, auth_header, correlation_id)
+
+        # ── Step 6: POST sentences to tome-ms-language (non-fatal on failure) ──────
+        sentences_created = 0
+        sentences_errored = 0
+        if deduped_sentences:
+            try:
+                sentence_dicts = [{"sentence": s.sentence, "translation": s.translation} for s in deduped_sentences]
+                sentences_created, sentences_errored = post_sentences(
+                    config, "danish", sentence_dicts, source_id, auth_header, correlation_id
+                )
+            except Exception as exc:
+                logger.log(correlation_id, f"Failed to post sentences (non-fatal): {exc}")
+                sentences_errored = len(deduped_sentences)
+
+        # ── Step 7: Update lastExtractedAt ─────────────────────────────────────────
         timestamp = datetime.now(timezone.utc).isoformat()
         store.update_last_extracted_at(source_id, timestamp)
 
@@ -131,6 +148,9 @@ async def extract_knowledge(request: Request, user_context: UserContext, exec_co
             "wordsExtracted": len(deduped),
             "wordsCreated": words_created,
             "wordsErrored": words_errored,
+            "sentencesExtracted": len(deduped_sentences),
+            "sentencesCreated": sentences_created,
+            "sentencesErrored": sentences_errored,
         },
         status_code=200,
     )
@@ -152,7 +172,7 @@ def _split_content(content: str) -> List[str]:
     return splitter.split_text(content)
 
 
-async def _extract_from_chunks( chunks: List[str], language: str, config, ) -> Tuple[List[Word], bool]:
+async def _extract_words_from_chunks( chunks: List[str], language: str, config, ) -> Tuple[List[Word], bool]:
     """
     Run LLM extraction over every chunk.
 
@@ -209,6 +229,42 @@ def _deduplicate(pairs: List[Word]) -> List[Word]:
     result = []
     for pair in pairs:
         key = (pair.english.lower(), pair.translation.lower())
+        if key not in seen:
+            seen.add(key)
+            result.append(pair)
+    return result
+
+
+async def _extract_sentences_from_chunks(
+    chunks: List[str], language: str, config
+) -> Tuple[List[SentencePair], bool]:
+    """
+    Run sentence extraction over every chunk.
+    Returns (all_sentence_pairs, all_failed).
+    """
+    all_pairs: List[SentencePair] = []
+    failed_count = 0
+
+    agent = SentenceExtractionAgent(config)
+
+    for chunk in chunks:
+        try:
+            result = await agent.extract(chunk)
+            all_pairs.extend(result.sentences)
+        except Exception as exc:
+            logging.warning("Sentence extraction failed for chunk: %s", exc)
+            failed_count += 1
+
+    all_failed = failed_count == len(chunks) and len(chunks) > 0
+    return all_pairs, all_failed
+
+
+def _deduplicate_sentences(pairs: List[SentencePair]) -> List[SentencePair]:
+    """Remove duplicate sentences (case-insensitive on the Danish sentence)."""
+    seen: set = set()
+    result = []
+    for pair in pairs:
+        key = pair.sentence.lower()
         if key not in seen:
             seen.add(key)
             result.append(pair)
