@@ -29,7 +29,8 @@ The Tome app will guide the user through this process.
 ## Specs
 
 ### Language Learning
-- [Source Knowledge Extraction](./docs/specs/language/source-knowledge-extraction.md) — full specification for data model, API endpoints, extraction workflow, and source type implementations
+- [Source Knowledge Extraction](./docs/specs/language/source-knowledge-extraction.md) — full specification for data model, API endpoints, extraction workflow (vocabulary + sentences), and source type implementations
+- [Sentence Generation](./docs/specs/language/sentence-generation.md) — on-demand LLM sentence generation using vocabulary words as seed material, including verification by a Danish language expert agent
 
 
 ## Dev Utilities
