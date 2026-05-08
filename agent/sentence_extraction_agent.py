@@ -7,6 +7,10 @@ from totoms import TotoLogger
 from agent.util import _create_llm
 from config.config import MyConfig
 
+# Minimum number of words a sentence must have to be kept.
+# This is a backstop filter applied after the LLM responds.
+MIN_SENTENCE_WORD_COUNT = 4
+
 
 class SentencePair(BaseModel):
     sentence: str
@@ -31,21 +35,33 @@ class SentenceExtractionAgent:
         prompt = """
             You are a language learning assistant specialising in Danish.
 
-            Read the following text and extract every complete sentence or meaningful phrase that is written in Danish.
-            For each sentence, provide its English translation.
+            Read the following text and extract complete Danish sentences that a language learner could use as example sentences.
 
-            Rules:
-            1. Only extract sentences that are ALREADY PRESENT in the text. Do NOT invent or synthesise new sentences.
-            2. If an English translation is already given in the text alongside the Danish sentence, use that translation.
-            3. If no translation is provided in the text, generate an accurate English translation yourself.
-            4. A sentence must be a complete phrase — not a single isolated word or a sentence fragment.
-            5. Exclude sentences that are entirely in English (only include Danish sentences).
+            STRICT RULES — violating any rule means the entry must be excluded:
+            1. Only extract text that is ALREADY PRESENT in the source. Do NOT invent or synthesise anything.
+            2. A valid entry MUST be a grammatically complete sentence: it must have at least a subject and a conjugated verb.
+               Isolated words, noun phrases, adjectives, infinitive phrases, and sentence fragments are NEVER valid — exclude them.
+               Examples of INVALID entries (do NOT include these):
+                 - "En ø"  (noun phrase, no verb)
+                 - "øde"  (single adjective)
+                 - "Behagelig"  (single adjective)
+                 - "En oplevelse"  (noun phrase, no verb)
+                 - "Erfaring"  (single noun)
+               Examples of VALID entries (these are fine):
+                 - "Da jeg var barn, boede jeg i Milano."
+                 - "Du er strandet på en øde ø i et helt år."
+                 - "Jeg kan godt lide at læse."
+            3. A sentence must contain at least 4 words.
+            4. If an English translation is already given in the text alongside the Danish sentence, use that translation.
+               Otherwise, generate an accurate English translation.
+            5. Exclude any entry where the 'sentence' field is entirely in English.
             6. Both 'sentence' and 'translation' must be non-empty strings.
 
             Return a JSON object with a single key 'sentences' whose value is a list of objects,
-            each having 'sentence' (the Danish phrase) and 'translation' (the English translation).
+            each having 'sentence' (the Danish sentence) and 'translation' (the English translation).
 
             Do not include any text outside the JSON object.
+            If no valid sentences are found, return {"sentences": []}.
         """
 
         structured_llm = llm.with_structured_output(SentencePairs)
@@ -53,8 +69,17 @@ class SentenceExtractionAgent:
 
         result: SentencePairs = await structured_llm.ainvoke([
             SystemMessage(content=prompt),
-            HumanMessage(content="Extract Danish sentences and their translations from the following text:\n\n" + chunk),
+            HumanMessage(content="Extract complete Danish sentences from the following text:\n\n" + chunk),
         ])  # type: ignore
 
-        logger.log("", f"Extracted {len(result.sentences)} sentences from chunk")
-        return result
+        # Backstop: drop anything that doesn't meet the minimum word count
+        filtered = [
+            s for s in result.sentences
+            if len(s.sentence.split()) >= MIN_SENTENCE_WORD_COUNT
+        ]
+
+        if len(filtered) < len(result.sentences):
+            logger.log("", f"Filtered out {len(result.sentences) - len(filtered)} short entries (< {MIN_SENTENCE_WORD_COUNT} words)")
+
+        logger.log("", f"Extracted {len(filtered)} sentences from chunk")
+        return SentencePairs(sentences=filtered)
