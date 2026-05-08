@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from starlette import authentication
 from agent.extraction_agent import KnowledgeExtractionAgent, Word
 from agent.sentence_extraction_agent import SentenceExtractionAgent, SentencePair
+from agent.sentence_verification_agent import SentenceVerificationAgent
 from api.tome_language_api import post_words, post_sentences
 from config.config import MyConfig
 from config.prompts import get_prompt
@@ -116,7 +117,16 @@ async def extract_knowledge(request: Request, user_context: UserContext, exec_co
         deduped_sentences = _deduplicate_sentences(all_sentence_pairs)
         logger.log("", f"Extracted {len(deduped_sentences)} sentences after deduplication")
 
-        # ── Step 5: POST vocabulary to tome-ms-language ────────────────────────────
+        # ── Step 5: Verify extracted sentences (drop mixed-language / incorrect Danish) ─
+        if deduped_sentences:
+            try:
+                verification_agent = SentenceVerificationAgent(config)
+                deduped_sentences = await verification_agent.verify_extracted(deduped_sentences)
+                logger.log("", f"{len(deduped_sentences)} sentences passed verification")
+            except Exception as exc:
+                logger.log("", f"Sentence verification failed (non-fatal, keeping unverified): {exc}")
+
+        # ── Step 6: POST vocabulary to tome-ms-language ────────────────────────────
         auth_header = request.headers.get("Authorization", "")
         correlation_id = exec_context.cid
 
@@ -125,7 +135,7 @@ async def extract_knowledge(request: Request, user_context: UserContext, exec_co
         if deduped:
             words_created, words_errored = post_words(config, "danish", deduped, source_id, auth_header, correlation_id)
 
-        # ── Step 6: POST sentences to tome-ms-language (non-fatal on failure) ──────
+        # ── Step 7: POST sentences to tome-ms-language (non-fatal on failure) ──────
         sentences_created = 0
         sentences_errored = 0
         if deduped_sentences:
@@ -138,7 +148,7 @@ async def extract_knowledge(request: Request, user_context: UserContext, exec_co
                 logger.log(correlation_id, f"Failed to post sentences (non-fatal): {exc}")
                 sentences_errored = len(deduped_sentences)
 
-        # ── Step 7: Update lastExtractedAt ─────────────────────────────────────────
+        # ── Step 8: Update lastExtractedAt ─────────────────────────────────────────
         timestamp = datetime.now(timezone.utc).isoformat()
         store.update_last_extracted_at(source_id, timestamp)
 
