@@ -6,6 +6,8 @@ from typing import Optional, Dict, List
 SUPPORTED_TYPES: List[str] = ["google_doc"]
 SUPPORTED_LANGUAGES: List[str] = ["danish"]
 
+MAX_GENERATION_ITERATIONS: int = 3
+
 
 class MyConfig(TotoControllerConfig):
     """Custom configuration for the tome-ms-sources service."""
@@ -42,6 +44,11 @@ class MyConfig(TotoControllerConfig):
     def supported_languages(self) -> List[str]:
         """Return the list of supported target languages."""
         return SUPPORTED_LANGUAGES
+
+    @property
+    def max_generation_iterations(self) -> int:
+        """Maximum number of generate→verify cycles (including the first pass)."""
+        return MAX_GENERATION_ITERATIONS
 
     @property
     def tome_language_url(self) -> Optional[str]:
