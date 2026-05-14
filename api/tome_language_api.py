@@ -4,6 +4,7 @@ from typing import List, Tuple
 from fastapi.responses import JSONResponse
 from totoms import TotoLogger
 from agent.extraction_agent import Word
+from agent.sentence_extraction_agent import SentencePair
 from config.config import MyConfig
 
 import requests
@@ -17,6 +18,9 @@ def post_words( config: MyConfig, language: str, words: List[Word], source_id: s
     Returns (words_created, words_errored) on
     success (207), or a JSONResponse with status 502 on failure.
     """
+    if words is None or len(words) == 0:
+        return (0, 0)
+    
     logger = TotoLogger.get_instance()
     
     url = f"{config.tome_language_url}/vocabulary/{language}/words/batch"
@@ -58,20 +62,18 @@ def post_words( config: MyConfig, language: str, words: List[Word], source_id: s
         return (0, len(words))
 
 
-def post_sentences(
-    config: MyConfig,
-    language: str,
-    sentences: List[dict],
-    knowledge_source: str,
-    auth_header: str,
-    correlation_id: str,
-) -> Tuple[int, int]:
+def post_sentences( config: MyConfig, language: str, sentences: List[SentencePair], knowledge_source: str, auth_header: str, correlation_id: str ) -> Tuple[int, int]:
     """
     POST sentences to tome-ms-language's batch endpoint.
     Returns (sentences_created, sentences_errored).
     Raises an exception if the service is unreachable.
     Does NOT raise on non-207 status — the caller decides how to handle that.
     """
+    if sentences is None or len(sentences) == 0:
+        return (0, 0)
+    
+    sentence_dicts = [{"sentence": s.sentence, "translation": s.translation} for s in sentences]
+    
     logger = TotoLogger.get_instance()
 
     url = f"{config.tome_language_url}/sentences/{language}/batch"
@@ -89,7 +91,7 @@ def post_sentences(
                 "translation": s["translation"],
                 "knowledgeSource": knowledge_source,
             }
-            for s in sentences
+            for s in sentence_dicts
         ]
     }
 
