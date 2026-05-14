@@ -253,9 +253,19 @@ Pass the plain-text content (or each chunk) to a LangChain chain configured with
 - The model and provider (e.g. OpenAI, Anthropic, Bedrock) are defined in the service configuration. The LLM API key must be loaded from the secrets manager.
 - The prompt must be treated as a service-level concern and must be easy to tune without code changes (e.g. stored in the service configuration or a dedicated prompt file).
 
+### Step 3 & 4 — Parallel LLM Extraction
+
+**Steps 3 and 4 must run concurrently** using `asyncio.gather()`. Neither extraction depends on the other, so running them sequentially wastes the user's time. The implementation must launch both coroutines in a single `await asyncio.gather(...)` call and wait for both to complete before proceeding to Step 5.
+
+Each extraction is encapsulated in its own utility module:
+- `dlg/word_extractor.py` — exposes `async def extract_words(chunks, language, config) -> tuple[list[Word], bool]`
+- `dlg/sentence_extractor.py` — exposes `async def extract_sentences(chunks, language, config) -> tuple[list[SentencePair], bool]`
+
+These modules own all deduplication logic for their respective outputs.
+
 ### Step 4 — LLM Sentence Extraction (LangChain)
 
-Pass the same plain-text content (or each chunk) to a **separate** LangChain agent dedicated to sentence extraction. This agent runs independently from the vocabulary extraction agent (Step 3) — they may run sequentially or in parallel; the implementation may choose.
+Pass the same plain-text content (or each chunk) to a **separate** LangChain agent dedicated to sentence extraction. This agent runs concurrently with the vocabulary extraction agent (Step 3) via `asyncio.gather()`.
 
 **Goal:** identify every complete **sentence or phrase** written in the target language (e.g. Danish) that appears in the source material, along with its English translation. The agent must **only extract sentences already present in the text** — it must never invent or synthesise new sentences.
 
